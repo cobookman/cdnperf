@@ -16,7 +16,7 @@ var (
 )
 
 const (
-	MaxIdleConnections int = 1
+	MaxIdleConnections int = 10
 	RequestTimeout int = 0
 )
 
@@ -36,7 +36,7 @@ func createHTTPClient() *http.Client {
 
 func main() {
 	url := flag.String("url", "test", "Url to performance profile")
-	iterations := flag.Int("iterations", 30, "number of times to send requests")
+	iterations := flag.Int("iterations", 100, "number of times to send requests")
 	flag.Parse();
 
 	log.Print(*url)
@@ -44,6 +44,7 @@ func main() {
 	// in Milliseconds
 	ttFBs := make([]float64, *iterations)
 	ttLBs := make([]float64, *iterations)
+	bodySizes := make([]float64, *iterations)
 
 	for i := 0; i < *iterations; i++ {
 		trace, err := test(*url)
@@ -53,7 +54,7 @@ func main() {
 
 		ttFBs[i] = trace.TTFB.Sub(trace.StartTime).Seconds() * 1000
 		ttLBs[i] = trace.TTLB.Sub(trace.StartTime).Seconds() * 1000
-
+		bodySizes[i] = float64(trace.BodySize)
 	        log.Printf("\tBody Size: %d KiB\n", trace.BodySize/1024)
 	        log.Printf("\tttfb: %s\n", trace.TTFB.Sub(trace.StartTime))
 	        log.Printf("\tttlb: %s\n", trace.TTLB.Sub(trace.StartTime))
@@ -61,6 +62,8 @@ func main() {
 	}
 
 	// calculate percentiles
+	medianBodySize, _ := stats.Median(bodySizes)
+
 	medianTTFB, _ := stats.Median(ttFBs)
 	p95TTFB, _ := stats.Percentile(ttFBs, 95)
 	p99TTFB, _ := stats.Percentile(ttFBs, 99)
@@ -70,16 +73,22 @@ func main() {
 	p99TTLB, _ := stats.Percentile(ttLBs, 99)
 
 	fmt.Println("Statistics:")
-	fmt.Printf(`
+	fmt.Printf(
+`
+	URL: %s
+	BodySize: %.0f KiB
 	Time to First Byte:
-		Median: %.2fms
-		95th: %.2fms
-		99th: %.2fms
+		Median: %.2f ms
+		95th: %.2f ms
+		99th: %.2f ms
 
 	Time to Last Byte:
-		Median: %.2fms
-		95th: %.2fms
-		99th: %.2fms`,
+		Median: %.2f ms
+		95th: %.2f ms
+		99th: %.2f ms
+`,
+	*url,
+	(medianBodySize / 1024),
 	medianTTFB, p95TTFB, p99TTFB,
 	medianTTLB, p95TTLB, p99TTLB)
 }
