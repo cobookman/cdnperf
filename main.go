@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"io"
 	"time"
 	"flag"
@@ -64,10 +65,12 @@ func main() {
 		bodySizes[i] = float64(trace.BodySize)
 		log.Printf("Iteration #%d", (i+1))
 		log.Printf("\tConnection Reuse: %t\n", trace.ConnectReused)
+		log.Printf("\tHTTP Status: %s\n", trace.HTTPStatus)
 	        log.Printf("\tBody Size: %d KiB\n", trace.BodySize/1024)
 	        log.Printf("\tttfb: %s\n", trace.TTFB.Sub(trace.StartTime))
 	        log.Printf("\tttlb: %s\n", trace.TTLB.Sub(trace.StartTime))
 	        log.Printf("\ttime creating connection: %s\n", trace.ConnectDone.Sub(trace.ConnectStart))
+		log.Printf("\tQuic Supported: %s\n", trace.QUICSupport)
 
 	}
 
@@ -86,9 +89,16 @@ func main() {
 	fmt.Printf(
 `
 	URL: %s
+
+	-- From frist response --
 	BodySize: %.0f KiB
 	CipherSuite: %s
 	TLS Version: %s
+	Quic: %s
+	HTTP Version: %s
+	HTTP Status: %s
+	--
+
 	Time to First Byte:
 		Median: %.2f ms
 		95th: %.2f ms
@@ -103,6 +113,9 @@ func main() {
 	(medianBodySize / 1024),
 	firstTrace.TLSCipherSuite,
 	firstTrace.TLSVersion,
+	firstTrace.QUICSupport,
+	firstTrace.HTTPVersion,
+	firstTrace.HTTPStatus,
 	medianTTFB, p95TTFB, p99TTFB,
 	medianTTLB, p95TTLB, p99TTLB)
 }
@@ -112,6 +125,18 @@ func test(url string) (*Trace, error) {
 	buf := make([]byte, 1024*1024) // 1MiB
 
 	req, _ := http.NewRequest("GET", url, nil)
+
+	// Explicitly set Accept GZIP Encoding so client lib doesn't
+	// de-compress paypload.
+	// see: https://golang.org/pkg/net/http/#Header
+	//
+	// ...If the Transport requests gzip on
+        // its own and gets a gzipped response, it's transparently
+        // decoded in the Response.Body. However, if the *user
+        // explicitly requested gzip* it is not automatically
+        // uncompressed.
+	req.Header.Add("Accept-Encoding", "gzip")
+
 	trace := new(Trace)
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace.ClientTrace()))
 
@@ -138,13 +163,48 @@ func test(url string) (*Trace, error) {
 		}
 		trace.BodySize += n
 	}
-
 	trace.TTLB = time.Now()
-	/** log.Printf("\tBody Size: %d KiB\n", size/1024)
-	log.Printf("\tttfb: %s\n", trace.TTFB.Sub(trace.StartTime))
-	log.Printf("\tttlb: %s\n", trace.TTLB.Sub(trace.StartTime))
-	log.Printf("\ttime creating connection: %s\n", trace.ConnectDone.Sub(trace.ConnectStart)) **/
+	trace.QUICSupport = quicVersion(resp.Header.Get("alt-svc"))
+	trace.HTTPVersion = resp.Proto
+	trace.HTTPStatus = resp.Status
 	return trace, nil
+}
+
+// Detects what QUIC versions supported in alt-svc header string
+func quicVersion (altSvc string) string {
+	if len(altSvc) == 0 {
+		return ""
+	}
+
+	parts := strings.Split(altSvc, ";")
+	services := strings.Split(parts[0], ",")
+
+	loc := ""
+	for _, service := range services {
+		service = strings.TrimSpace(service)
+		if strings.HasPrefix(service, "quic=") {
+			loc = strings.Replace(service, "quic=\"", "", 1)
+			loc = strings.Replace(loc, "\"", "", -1)
+		}
+	}
+
+	versions := ""
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "v=\"") {
+			versions = strings.Replace(part, "v=\"", "", 1)
+			versions = strings.Replace(versions, "\"", "", -1)
+		}
+	}
+
+	out := "No"
+	if len(loc) != 0 {
+		out = "Yes, at " + loc
+	}
+	if len(versions) != 0 {
+		out += " with versions: " + versions
+	}
+	return out
 }
 
 

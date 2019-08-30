@@ -46,6 +46,15 @@ type Trace struct {
 
 	// Size of Body in Bytes
 	BodySize int
+
+	// Set if endpoint supports QUIC, with list of versions
+	QUICSupport string
+
+	// HTTP Version used
+	HTTPVersion string
+
+	// Status Code
+	HTTPStatus string
 }
 
 func (trace *Trace) ClientTrace() (*httptrace.ClientTrace) {
