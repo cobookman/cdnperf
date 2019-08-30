@@ -46,6 +46,13 @@ func main() {
 	ttLBs := make([]float64, *iterations)
 	bodySizes := make([]float64, *iterations)
 
+	// do one request to establish connection (sunk cost)
+	firstTrace, err := test(*url)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// now that connection *should* be established, run tests
 	for i := 0; i < *iterations; i++ {
 		trace, err := test(*url)
 		if err != nil {
@@ -55,10 +62,13 @@ func main() {
 		ttFBs[i] = trace.TTFB.Sub(trace.StartTime).Seconds() * 1000
 		ttLBs[i] = trace.TTLB.Sub(trace.StartTime).Seconds() * 1000
 		bodySizes[i] = float64(trace.BodySize)
+		log.Printf("Iteration #%d", (i+1))
+		log.Printf("\tConnection Reuse: %t\n", trace.ConnectReused)
 	        log.Printf("\tBody Size: %d KiB\n", trace.BodySize/1024)
 	        log.Printf("\tttfb: %s\n", trace.TTFB.Sub(trace.StartTime))
 	        log.Printf("\tttlb: %s\n", trace.TTLB.Sub(trace.StartTime))
 	        log.Printf("\ttime creating connection: %s\n", trace.ConnectDone.Sub(trace.ConnectStart))
+
 	}
 
 	// calculate percentiles
@@ -77,6 +87,8 @@ func main() {
 `
 	URL: %s
 	BodySize: %.0f KiB
+	CipherSuite: %s
+	TLS Version: %s
 	Time to First Byte:
 		Median: %.2f ms
 		95th: %.2f ms
@@ -89,6 +101,8 @@ func main() {
 `,
 	*url,
 	(medianBodySize / 1024),
+	firstTrace.TLSCipherSuite,
+	firstTrace.TLSVersion,
 	medianTTFB, p95TTFB, p99TTFB,
 	medianTTLB, p95TTLB, p99TTLB)
 }
