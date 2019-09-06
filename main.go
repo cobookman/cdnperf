@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"io"
 	"time"
@@ -36,9 +37,13 @@ func createHTTPClient() *http.Client {
 }
 
 func main() {
-	url := flag.String("url", "test", "Url to performance profile")
+	url := flag.String("url", "", "url to performance profile")
 	iterations := flag.Int("iterations", 100, "number of times to send requests")
 	flag.Parse();
+	if (len(*url) == 0) {
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
 
 	log.Print(*url)
 
@@ -63,7 +68,7 @@ func main() {
 		ttFBs[i] = trace.TTFB.Sub(trace.StartTime).Seconds() * 1000
 		ttLBs[i] = trace.TTLB.Sub(trace.StartTime).Seconds() * 1000
 		bodySizes[i] = float64(trace.BodySize)
-		log.Printf("Iteration #%d", (i+1))
+		log.Printf("HTTP GET [#%d]", (i+1))
 		log.Printf("\tConnection Reuse: %t\n", trace.ConnectReused)
 		log.Printf("\tHTTP Status: %s\n", trace.HTTPStatus)
 	        log.Printf("\tBody Size: %d KiB\n", trace.BodySize/1024)
@@ -73,6 +78,17 @@ func main() {
 		log.Printf("\tQuic Supported: %s\n", trace.QUICSupport)
 
 	}
+
+	// Run ping tests
+	tcpRttsDurations, err := TcpRtt(*url, *iterations)
+	if err != nil {
+		log.Fatal(err)
+	}
+	tcpRttsMillis := make([]float64, *iterations)
+	for i := 0; i < *iterations; i ++ {
+		tcpRttsMillis[i] = (*tcpRttsDurations)[i].Seconds() * 1000
+	}
+
 
 	// calculate percentiles
 	medianBodySize, _ := stats.Median(bodySizes)
@@ -84,6 +100,10 @@ func main() {
 	medianTTLB, _ := stats.Median(ttLBs)
 	p95TTLB, _ := stats.Percentile(ttLBs, 95)
 	p99TTLB, _ := stats.Percentile(ttLBs, 99)
+
+	medianTcpRtt, _ := stats.Median(tcpRttsMillis)
+	p95TcpRtt, _ := stats.Percentile(tcpRttsMillis, 95)
+	p99TcpRtt, _ := stats.Percentile(tcpRttsMillis, 99)
 
 	fmt.Println("Statistics:")
 	fmt.Printf(
@@ -108,6 +128,11 @@ func main() {
 		Median: %.2f ms
 		95th: %.2f ms
 		99th: %.2f ms
+
+	TCP Round Trip Time:
+		Median: %.2f ms
+		95th: %.2f ms
+		99th: %.2f ms
 `,
 	*url,
 	(medianBodySize / 1024),
@@ -117,7 +142,8 @@ func main() {
 	firstTrace.HTTPVersion,
 	firstTrace.HTTPStatus,
 	medianTTFB, p95TTFB, p99TTFB,
-	medianTTLB, p95TTLB, p99TTLB)
+	medianTTLB, p95TTLB, p99TTLB,
+	medianTcpRtt, p95TcpRtt, p99TcpRtt)
 }
 
 func test(url string) (*Trace, error) {
